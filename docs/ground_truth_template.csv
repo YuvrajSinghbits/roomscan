@@ -1,0 +1,6 @@
+room,item,kind,value_m,method,notes
+kitchen,wall_1,wall_length,,tape,"walls numbered clockwise starting from the entry door wall"
+kitchen,wall_2,wall_length,,tape,
+kitchen,ceiling,ceiling_height,,laser,"measure at room centre"
+kitchen,door_1,opening_width,,tape,"clear width inside the frame"
+kitchen,window_1,opening_width,,tape,
