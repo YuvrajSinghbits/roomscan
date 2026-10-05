@@ -7,6 +7,8 @@ dependencies = [
   "numpy>=1.26",
   "jsonschema>=4.21",
   "matplotlib>=3.8",
+  "pillow>=10",
+  "scipy>=1.11",
 ]
 
 [project.optional-dependencies]
