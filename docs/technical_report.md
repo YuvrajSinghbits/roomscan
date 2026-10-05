@@ -155,15 +155,24 @@ narrow, and that is reported as a miss, not tuned away silently.
   unmeasured.
 * **Non-Manhattan walls** (angled bay walls) are snapped to the dominant axes.
 
-## 8. Fix loop
+## 8. Repeatability
+
+The two multi-room sample captures are the same flat, so the repeatability gate
+was measured for real ([repeatability.md](repeatability.md)): 4 of 13 walls
+measured in both scans agree within max(1 cm, 0.5%), with a median difference of
+2.2 cm. The differences have mixed signs, so this is **unrepeatable, not biased**.
+The large ones come from the two scans fitting different surfaces (a wardrobe
+front against the wall behind it).
+
+## 9. Fix loop
 
 See [fix_loop.md](fix_loop.md): the worst measurable gate (damage phantoms), the
 root cause, the fix, and the predicted and measured before/after, both
 regenerable from this code.
 
-## 9. What is missing and why
+## 10. What is missing and why
 
-There is no tape or laser ground truth, no staged-damage room, no repeat
-capture and no consumer-app head-to-head. All of these need iPhone captures of
+There is no tape or laser ground truth, no staged-damage room and no
+consumer-app head-to-head. All of these need iPhone captures of
 rooms we can physically access. The pipeline accepts them as-is:
 `docs/ground_truth_template.csv` plus `scripts/run_all.sh`.

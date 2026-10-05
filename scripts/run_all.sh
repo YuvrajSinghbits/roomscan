@@ -19,3 +19,4 @@ for c in c00a170fe1:single_room 1a8384c3f6:floor_only c7d28f72c6:with_ceiling; d
   ROOMSCAN_DAMAGE_PROFILE=after roomscan run "$D/$id" --out out/fixloop_after_$name
 done
 python scripts/report.py > docs/benchmark_results.md
+python scripts/repeatability.py out/lidar_floor_only/result.json out/lidar_with_ceiling/result.json

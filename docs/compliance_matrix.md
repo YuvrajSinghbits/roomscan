@@ -23,7 +23,7 @@ known gaps stated; **Not met** = missing, with the reason.
 | 16 | Drift accountability + on/off ablation | drift.py, `--no-drift-correction` | benchmark_results.md "Drift ablation" | Done |
 | 17 | Gate: openings ≤ 2 cm on ≥ 85% | plan2d.py | synthetic test | Partial — met on synthetic (≤ 1 cm); unscored on real data (no ground truth) |
 | 18 | Gate: ceiling ≤ 1.5 cm, repeat spread ≤ 1 cm | plan2d.py (`room_level`) | synthetic test | Partial — met on synthetic; no repeat capture available |
-| 19 | Gate: repeatability (two captures, ≤ 1 cm / 0.5%) | — | — | Not met — needs a second capture of the same room |
+| 19 | Gate: repeatability (two captures, ≤ 1 cm / 0.5%) | scripts/repeatability.py | docs/repeatability.md | Measured, **fails**: 4/13 walls within gate, median 2.2 cm; diagnosed as unrepeatable (surface choice), not biased |
 | 20 | Gate: photo-tier stitch, footprint ±8%, calibrated | photo.py | benchmark_results.md | Partial — runs; accuracy measured only against LiDAR on proxy photos |
 | 21 | Benchmark set built by us (multi-room, damage room, all tiers, repeat, tape truth) | docs/ground_truth_template.csv, scripts/run_all.sh | benchmark_results.md | Partial — uses the provided sample captures; video/photo derived from the same footage; no tape truth, no staged damage, no repeat |
 | 22 | Head-to-head vs a consumer app on 2 rooms | — | — | Not met — needs an iPhone capture with the consumer app on rooms we can access |
