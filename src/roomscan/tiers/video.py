@@ -29,9 +29,11 @@ MAX_FRAMES = 600
 WORK_W = 640                 # long side used for features
 FX_RATIO = 0.82              # iPhone 1x video: fx ~ 0.80-0.84 x long side
 DEPTH_SIZE = (256, 192)      # same grid as the LiDAR depth maps
-# error model, 90% half-widths added in quadrature to the geometric fit:
-# monocular depth scale (~3%) and focal-length prior; calibrate on the benchmark
-VIDEO_REL = 0.03
+# error model, 90% half-widths added in quadrature to the geometric fit.
+# Set from measured errors, not hoped-for ones: monocular depth has a 37%
+# per-frame scale spread vs LiDAR, and the first video-vs-LiDAR footprint on the
+# sample data was -24% with an interval that missed the reference.
+VIDEO_REL = 0.25
 VIDEO_ABS = 0.02
 
 

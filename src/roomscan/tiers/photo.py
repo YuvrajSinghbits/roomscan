@@ -37,7 +37,10 @@ WORK = 640
 CORNER_OFFSET = 0.30        # camera to each back wall when standing in a corner, m
 CORNER_OFFSET_SIG = 0.08
 DEFAULT_F35 = 24.0          # iPhone 15 Pro 1x main camera, 35 mm equivalent
-PHOTO_REL = 0.05            # depth-model scale error, 90% half-width (relative)
+# 90% relative half-width from the depth model's measured per-photo scale
+# spread (37%) averaged over a few photos, plus off-protocol framing; the first
+# photo-vs-LiDAR footprint on the sample data was -56% with a missed interval.
+PHOTO_REL = 0.40
 PHOTO_ABS = 0.02
 WALL_T = 0.12               # assumed interior wall thickness when placing rooms
 
@@ -352,7 +355,7 @@ def process(capture: Path, out_dir: Path, **_) -> dict:
             room.floor, room.ceiling = 0.0, float(np.median(hs))
             room.height_hw = float(Z90 * np.sqrt((np.std(hs) / np.sqrt(len(hs)) if len(hs) > 1 else 0.05) ** 2))
         else:
-            room.floor, room.ceiling, room.ceiling_seen = 0.0, 2.4, False
+            room.floor, room.ceiling = 0.0, None
         rooms.append(room)
         by_name[name] = room
 

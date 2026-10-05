@@ -61,6 +61,9 @@ CEILING_UNSEEN_SPAN = 0.8
 
 
 def _ceiling(room):
+    if room.ceiling is None:
+        return {"value": 2.7, "lo": 2.2, "hi": 3.2, "unit": "m",
+                "note": "ceiling not visible in any photo; residential range, not a measurement"}
     h = room.ceiling - room.floor
     if room.ceiling_seen:
         return measurement(h, room.height_hw)
@@ -105,7 +108,7 @@ def widen(doc, rel: float, abs_: float):
     """
     def walk(x):
         if isinstance(x, dict):
-            if {"value", "lo", "hi", "unit"} <= x.keys() and x["unit"] in ("m", "m2"):
+            if {"value", "lo", "hi", "unit"} <= x.keys() and x["unit"] in ("m", "m2") and "note" not in x:
                 v = x["value"]
                 r = rel * (2 if x["unit"] == "m2" else 1)
                 a = abs_ * (np.sqrt(max(v, 0)) * 2 if x["unit"] == "m2" else 1)
