@@ -115,7 +115,14 @@ def test_drift_ablation(result, ablation):
     assert off["drift_correction"] == "none"
     err_on = abs(on["footprint_area"]["value"] - truth_area)
     err_off = abs(off["footprint_area"]["value"] - truth_area)
+    # the stitched footprint is where drift shows: rooms seen in drifted passes
+    # lose wall support and shrink. Per-room walls stay good either way because
+    # pruning keeps the self-consistent surfaces.
     assert err_on < 0.1
-    assert err_on < err_off
-    assert len(on["adjacency"]) > len(off["adjacency"]) or \
-        sum(len(r["walls"]) for r in ablation["rooms"]) > sum(len(r["walls"]) for r in result["rooms"])
+    assert err_off > 10 * err_on and err_off / truth_area > 0.03
+    def wall_err(res):
+        truth = _truth_dims()
+        errs = [min(abs(w["length"]["value"] - t) for t in truth[name])
+                for name, room in _match(res).items() for w in room["walls"]]
+        return float(np.mean(errs))
+    assert wall_err(result) < 0.01

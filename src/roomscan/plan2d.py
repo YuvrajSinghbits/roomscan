@@ -42,6 +42,9 @@ MIN_WALL_PTS = 40
 MIN_WALL_COVER = 0.35
 # Wall fits use surfaces above typical furniture (beds, sofas, desks, counters)
 WALL_FIT_MIN_H = 0.9
+MIN_OPENING = 0.45     # narrower gaps are not walkable doorways
+MAX_OPENING = 2.6      # wider "gaps" are unscanned wall, not an opening
+MAX_DOOR_W = 1.3       # door vs open passage when the head was not scanned
 
 
 @dataclass
@@ -221,6 +224,9 @@ def segment_rooms(cloud: Cloud, ceiling: float, cams_xy: np.ndarray, door_max=0.
     seen = g.count(cloud.xy[((nh > 0.9) & (np.abs(cloud.h) < 0.05)) |
                             ((nh < -0.9) & (np.abs(cloud.h - ceiling) < 0.08))]) >= 1
     soffit = g.count(cloud.xy[(nh < -0.9) & (cloud.h > 1.75) & (cloud.h < ceiling - 0.12)]) >= 2
+    # door heads are thin strips (wall thickness x door width); broad low
+    # surfaces are lowered ceilings, bulkheads or lofts and must not cut rooms
+    soffit &= ~ndimage.binary_opening(soffit, _disk(0.20))
 
     free = ndimage.binary_closing(seen | (carve_free(g, cloud, cams_xy) >= 3), _disk(0.10), border_value=0)
     free = ndimage.binary_fill_holes(free)
@@ -385,34 +391,41 @@ def refine_lines(lines, cloud: Cloud, ceiling: float, iters=2):
     return lines
 
 
-def prune_unsupported(lines, cloud: Cloud, ceiling: float, max_iter=60):
+def prune_unsupported(lines, cloud: Cloud, ceiling: float, min_area: float = 0.0, max_iter=60):
     """Remove outline sides that no wall surface backs, shortest first.
 
     The two parallel neighbours of a removed side merge onto the better
     supported one; on a tie the outer one, since unscanned floor next to a
-    wall is usually furniture or occlusion rather than a missing room.
+    wall is usually furniture or occlusion rather than a missing room. A merge
+    that would collapse the outline (area below `min_area`) is not taken.
     """
     lines = refine_lines(lines, cloud, ceiling)
+    stuck = set()
     for _ in range(max_iter):
         n = len(lines)
         if n <= 4:
             break
         lens = [abs(lines[(k + 1) % n].c - lines[k - 1].c) for k in range(n)]
-        cand = [k for k in range(n) if not lines[k].supported]
+        cand = [k for k in range(n) if not lines[k].supported and (lines[k].axis, round(lines[k].c, 3)) not in stuck]
         if not cand:
             break
         k = min(cand, key=lambda j: lens[j])
         i0, i2 = (k - 1) % n, (k + 1) % n
         a, b = lines[i0], lines[i2]
         if a.supported != b.supported:
-            keep = a if a.supported else b
-        elif a.n_pts * a.cover != b.n_pts * b.cover and (a.supported and b.supported):
-            keep = a if a.n_pts * a.cover > b.n_pts * b.cover else b
+            order = [a, b] if a.supported else [b, a]
+        elif a.supported and a.n_pts * a.cover != b.n_pts * b.cover:
+            order = sorted([a, b], key=lambda x: -x.n_pts * x.cover)
         else:
-            keep = a if a.c * a.inward < b.c * b.inward else b      # outer
-        merged = Line(keep.axis, keep.c, keep.inward, keep.hw, keep.n_pts, keep.cover)
-        lines = [merged if i == i0 else lines[i] for i in range(n) if i not in (k, i2)]
-        lines = remove_jogs(refine_lines(lines, cloud, ceiling, iters=1), tol=0.10)
+            order = sorted([a, b], key=lambda x: x.c * x.inward)          # outer first
+        for keep in order:
+            merged = Line(keep.axis, keep.c, keep.inward, keep.hw, keep.n_pts, keep.cover)
+            trial = [merged if i == i0 else lines[i] for i in range(n) if i not in (k, i2)]
+            if polygon_area(vertices(trial)) >= min_area:
+                lines = remove_jogs(refine_lines(trial, cloud, ceiling, iters=1), tol=0.10)
+                break
+        else:
+            stuck.add((lines[k].axis, round(lines[k].c, 3)))
     return refine_lines(lines, cloud, ceiling)
 
 
@@ -476,54 +489,70 @@ def opening_sill(cloud: Cloud, ln: Line, s0, s1, below, thickness=0.4):
     return lv, Z90 * np.hypot(se, SIG_LEVEL_SYS)
 
 
-def find_doors(rooms, g: Grid, labels, cloud: Cloud, ceiling: float):
-    adj = []
-    by_label = {i + 1: r for i, r in enumerate(rooms)}
-    n = len(rooms)
-    for a in range(1, n + 1):
-        for b in range(a + 1, n + 1):
-            touch = (labels == a) & (
-                ndimage.binary_dilation(labels == b, ndimage.generate_binary_structure(2, 1)))
-            if touch.sum() < 3:
-                continue
-            clusters, nc = ndimage.label(ndimage.binary_dilation(touch, iterations=2))
-            for ci in range(1, nc + 1):
-                rr, cc = np.nonzero(touch & (clusters == ci))
-                if len(rr) < 3:
-                    continue
-                centre = np.array([g.x(cc.mean() + 0.5), g.y(rr.mean() + 0.5)])
-                ops = []
-                for room in (by_label[a], by_label[b]):
-                    k = _nearest_line(room.lines, centre)
-                    if k is None:
-                        break
-                    ln = room.lines[k]
-                    sc = centre[1] if ln.axis == "v" else centre[0]
-                    gap = measure_gap(cloud, ln, sc)
-                    if gap is None:
-                        break
-                    hgt, hhw = opening_height(cloud, ln, gap[0], gap[1], ceiling)
-                    kind = "door" if hgt is not None and hgt < ceiling - 0.1 else "open_passage"
-                    ops.append((room, Opening(kind, k, *gap, height=hgt, height_hw=hhw)))
-                if len(ops) != 2:
-                    continue
-                (ra, oa), (rb, ob) = ops
-                oa.other, ob.other = rb.id, ra.id
-                for room, op in ops:
-                    op.id = f"{room.id}_o{len(room.openings) + 1}"
-                    room.openings.append(op)
-                adj.append((ra.id, rb.id, oa.id))
-    return adj
+def _room_paths(rooms):
+    from matplotlib.path import Path as MPath
+    return [MPath(vertices(r.lines)) for r in rooms]
 
 
-def _nearest_line(lines, p, max_d=0.4):
-    best, bd = None, max_d
-    for k, ln in enumerate(lines):
-        s0, s1 = sorted(line_span(lines, k))
-        q, s = (p[0], p[1]) if ln.axis == "v" else (p[1], p[0])
-        if s0 - 0.1 <= s <= s1 + 0.1 and abs(q - ln.c) < bd:
-            best, bd = k, abs(q - ln.c)
-    return best
+def find_doors(rooms, cloud: Cloud, ceiling: float, cams_xy: np.ndarray, look_ahead=3.0):
+    """Doors where the walk crosses a room's wall line.
+
+    The capture protocol walks through every doorway between captured rooms,
+    so each crossing of a wall line by the camera path is a candidate. The
+    opening itself is measured as the hole in that wall's surface points around
+    the crossing; the room on the other side is the first room the path enters
+    within `look_ahead` metres.
+    """
+    paths = _room_paths(rooms)
+    inside = np.stack([p.contains_points(cams_xy) for p in paths], 1)     # (n_cams, n_rooms)
+    step = np.r_[0, np.linalg.norm(np.diff(cams_xy, axis=0), axis=1)]
+    walked = np.cumsum(step)
+    adj = {}
+    for ai, room in enumerate(rooms):
+        for k, ln in enumerate(room.lines):
+            s0, s1 = sorted(line_span(room.lines, k))
+            q = cams_xy[:, 0] if ln.axis == "v" else cams_xy[:, 1]
+            sv = cams_xy[:, 1] if ln.axis == "v" else cams_xy[:, 0]
+            side = np.sign(q - ln.c)
+            idx = np.nonzero(side[:-1] * side[1:] < 0)[0]
+            crossings = []
+            for i in idx:
+                t = (ln.c - q[i]) / (q[i + 1] - q[i])
+                sc = sv[i] + t * (sv[i + 1] - sv[i])
+                if s0 - 0.05 < sc < s1 + 0.05:
+                    # the camera is outside this room on one side of the crossing
+                    out_j = i if (q[i] - ln.c) * ln.inward < 0 else i + 1
+                    crossings.append((sc, i, out_j))
+            done = []
+            for sc, i, out_j in crossings:
+                if any(a - 0.05 < sc < b + 0.05 for a, b in done):
+                    continue
+                gap = measure_gap(cloud, ln, sc)
+                if gap is None or not MIN_OPENING <= gap[1] - gap[0] <= MAX_OPENING                         or not gap[0] - 0.05 < sc < gap[1] + 0.05:
+                    continue
+                done.append((gap[0], gap[1]))
+                # follow the walk away from this room to find the neighbour
+                direction = 1 if out_j == i + 1 else -1
+                j, other = out_j, None
+                while 0 <= j < len(cams_xy) and abs(walked[j] - walked[out_j]) < look_ahead:
+                    hits = [r for r in np.nonzero(inside[j])[0] if r != ai]
+                    if hits:
+                        other = rooms[hits[0]]
+                        break
+                    if inside[j, ai] and j != out_j:
+                        break
+                    j += direction
+                hgt, hhw = opening_height(cloud, ln, gap[0], gap[1], ceiling)
+                if hgt is not None:
+                    kind = "door" if hgt < ceiling - 0.1 else "open_passage"
+                else:
+                    kind = "door" if gap[1] - gap[0] <= MAX_DOOR_W else "open_passage"
+                op = Opening(kind, k, *gap, height=hgt, height_hw=hhw,
+                             other=other.id if other else None, id=f"{room.id}_o{len(room.openings) + 1}")
+                room.openings.append(op)
+                if other is not None:
+                    adj.setdefault(frozenset((room.id, other.id)), (room.id, other.id, op.id))
+    return list(adj.values())
 
 
 def find_windows(room: Room, cloud: Cloud, ceiling: float, min_w=0.35):
@@ -558,7 +587,7 @@ def find_windows(room: Room, cloud: Cloud, ceiling: float, min_w=0.35):
             sill = float(np.percentile(fh[cs & (fh < 1.1)], 98))
             head_guess = float(np.percentile(fh[cs & (fh > 1.6)], 2))
             gap = measure_gap(cloud, ln, centre, band=(sill + 0.1, head_guess - 0.1))
-            if gap is None:
+            if gap is None or gap[1] - gap[0] < min_w:
                 continue
             head, head_hw = opening_height(cloud, ln, gap[0], gap[1], ceiling, from_h=sill + 0.3)
             sill_lv, sill_hw = opening_sill(cloud, ln, gap[0], gap[1], head if head else head_guess)
@@ -582,7 +611,10 @@ def room_level(cloud: Cloud, g: Grid, mask, floor_guess, ceil_guess):
     inside[ok] = inner[r[ok], c[ok]]
     nh = cloud.n[:, 2]
     f, fse = _refine_level(cloud.h[inside & (nh > 0.95)], floor_guess)
-    c_, cse = _refine_level(cloud.h[inside & (nh < -0.95)], ceil_guess)
+    # each room's own ceiling: lowered/false ceilings differ from the global level
+    down = cloud.h[inside & (nh < -0.95)]
+    own = _peak(down, 1.9, ceil_guess + 0.3)
+    c_, cse = _refine_level(down, own if own is not None else ceil_guess)
     return f, c_, Z90 * np.sqrt(fse ** 2 + cse ** 2 + 2 * SIG_LEVEL_SYS ** 2)
 
 
@@ -622,7 +654,15 @@ def build_plan(cloud: Cloud, cams_xy: np.ndarray, cam_frames: np.ndarray):
         lo, hi = v0.min(0) - 0.5, v0.max(0) + 0.5
         near = wall_pts & np.all((cloud.xy > lo) & (cloud.xy < hi), axis=1)
         wc = Cloud(cloud.xy[near], cloud.h[near], cloud.n[near])
-        lines = prune_unsupported(lines, wc, ceiling)
+        mask_area = float(sm.sum()) * CELL ** 2
+        traced = lines
+        lines = prune_unsupported(lines, wc, ceiling, min_area=0.6 * mask_area)
+        if polygon_area(vertices(lines)) < 0.6 * mask_area:
+            # irregular space (typically a hall): keep the traced outline; its
+            # unsupported sides already carry the wide interval
+            lines = refine_lines(traced, wc, ceiling)
+            if polygon_area(vertices(lines)) < 0.6 * mask_area:
+                continue
         lines = remove_jogs(lines, tol=0.10)
         hit = ok.copy()
         hit[ok] = labels[r[ok], c[ok]] == i
@@ -636,7 +676,6 @@ def build_plan(cloud: Cloud, cams_xy: np.ndarray, cam_frames: np.ndarray):
 
     # stable naming in walk order; long thin spaces are corridors
     order = sorted(range(len(rooms)), key=lambda j: rooms[j].first_frame)
-    relabel = np.zeros(n + 1, int)
     kept = []
     for new_i, j in enumerate(order, 1):
         room = rooms[j]
@@ -644,13 +683,7 @@ def build_plan(cloud: Cloud, cams_xy: np.ndarray, cam_frames: np.ndarray):
         w, d = np.ptp(vertices(room.lines), axis=0)
         room.name = ("Corridor " if min(w, d) < 1.8 and max(w, d) / max(min(w, d), 1e-6) > 2.5 else "Room ") + str(new_i)
         kept.append(room)
-    # labels must match the kept room order for door detection
-    for new_i, room in enumerate(kept, 1):
-        relabel_mask = room.mask
-        labels = np.where(relabel_mask, -new_i, labels)
-    labels = np.where(labels < 0, -labels, 0)
-
-    adjacency = find_doors(kept, g, labels, cloud, ceiling)
+    adjacency = find_doors(kept, cloud, ceiling, cams_xy)
     for room in kept:
         find_windows(room, cloud, ceiling)
     return kept, adjacency, theta, cloud
