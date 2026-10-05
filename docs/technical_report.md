@@ -110,8 +110,8 @@ Every number is a 90% interval (1.645σ):
 | unsupported wall side | ±25 cm (90%) | no surface observed |
 | level (floor/ceiling) | 4 mm systematic + statistical | per room |
 | opening edge | 5 mm + jamb statistics, or point spacing | per edge |
-| video error model | 3% + 2 cm (90%) | monocular scale after calibration |
-| photo error model | 5% + 2 cm (90%) + corner spread + offset prior | monocular scale, stance |
+| video error model | 25% + 2 cm (90%) | measured: 37% per-frame depth spread; first cross-tier run −24% outside a 3% interval |
+| photo error model | 40% + 2 cm (90%) + corner spread + offset prior | measured per-photo scale spread; off-protocol proxy errors −56…−74% |
 
 Lengths combine their two bounding wall planes in quadrature. Area adds Σ(Lₖ·hwₖ)²
 from wall shifts.

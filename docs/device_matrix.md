@@ -16,7 +16,7 @@ into every measurement of every capture.
 
 | Quantity | lidar | video | photo |
 |---|---|---|---|
-| Wall length | ±1.2 cm where the wall surface is scanned; ±25 cm on outline sides with no wall surface behind them | ±3% + 2 cm (error model) on top of fit spread | ±5% + 2 cm on top of the corner-photo spread and ±8 cm corner-offset prior |
+| Wall length | ±1.2 cm where the wall surface is scanned; ±25 cm on outline sides with no wall surface behind them | ±25% + 2 cm (error model, set from measured errors) | ±40% + 2 cm, plus corner-photo spread and ±8 cm corner-offset prior |
 | Ceiling height | ±1 cm when the ceiling is scanned; lower bound only when it is not | as lidar, + error model | median of per-photo floor-to-ceiling, + error model |
 | Openings | width ±1.2–3.5 cm (jamb-refined edges), head height ±1 cm | as lidar, + error model | width from door photos; position along wall not observed (interval = whole wall) |
 | Drift | Manhattan heading anchor + loop closure | same, on visual odometry (heading drift ~10× ARKit's) | n/a (independent stills) |
