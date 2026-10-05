@@ -226,3 +226,37 @@ def camera_points(f: Frame, step: int = 2, max_depth: float = 5.0, k: int = 2):
 def to_world(pose: np.ndarray, pts: np.ndarray, normals: np.ndarray):
     R, t = pose[:3, :3], pose[:3, 3]
     return pts @ R.T + t, normals @ R.T
+
+
+def load_rgb(root: Path, indices, width: int = 640):
+    """RGB frames (HxWx3 uint8, long side `width`) for the given frame indices.
+
+    Stray Scanner: frame i of rgb.mp4 matches depth/i. 3D Scanner App: frame_i.jpg.
+    Frames are in sensor orientation, matching the depth maps and intrinsics.
+    """
+    import cv2
+
+    root = find_capture(root)
+    out = []
+    if is_stray(root):
+        cap = cv2.VideoCapture(str(root / "rgb.mp4"))
+        for i in indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(i))
+            ok, img = cap.read()
+            out.append(_resize_rgb(img, width) if ok else None)
+        cap.release()
+    else:
+        for i in indices:
+            p = root / f"frame_{i:05d}.jpg"
+            img = cv2.imread(str(p)) if p.exists() else None
+            out.append(_resize_rgb(img, width) if img is not None else None)
+    return out
+
+
+def _resize_rgb(img, width):
+    import cv2
+
+    h, w = img.shape[:2]
+    s = width / max(h, w)
+    return cv2.cvtColor(cv2.resize(img, (round(w * s), round(h * s)), interpolation=cv2.INTER_AREA),
+                        cv2.COLOR_BGR2RGB)

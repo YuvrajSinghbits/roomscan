@@ -503,6 +503,8 @@ def find_doors(rooms, cloud: Cloud, ceiling: float, cams_xy: np.ndarray, look_ah
     the crossing; the room on the other side is the first room the path enters
     within `look_ahead` metres.
     """
+    if not rooms:
+        return []
     paths = _room_paths(rooms)
     inside = np.stack([p.contains_points(cams_xy) for p in paths], 1)     # (n_cams, n_rooms)
     step = np.r_[0, np.linalg.norm(np.diff(cams_xy, axis=0), axis=1)]
@@ -619,7 +621,11 @@ def room_level(cloud: Cloud, g: Grid, mask, floor_guess, ceil_guess):
 
 
 def build_plan(cloud: Cloud, cams_xy: np.ndarray, cam_frames: np.ndarray):
-    """cloud and cams in plan coords (absolute heights). Returns (rooms, adjacency, theta)."""
+    """cloud and cams in plan coords (absolute heights).
+
+    Returns (rooms, adjacency, theta, aligned cloud, floor level): theta and the
+    floor level map world points into the frame the rooms live in.
+    """
     vert = np.abs(cloud.n[:, 2]) < 0.3
     theta = manhattan_angle(cloud.n[vert, :2])
     cloud = Cloud(rotate(cloud.xy, theta), cloud.h.copy(),
@@ -686,7 +692,7 @@ def build_plan(cloud: Cloud, cams_xy: np.ndarray, cam_frames: np.ndarray):
     adjacency = find_doors(kept, cloud, ceiling, cams_xy)
     for room in kept:
         find_windows(room, cloud, ceiling)
-    return kept, adjacency, theta, cloud
+    return kept, adjacency, theta, cloud, floor
 
 
 def polygon_area(v):

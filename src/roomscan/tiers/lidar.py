@@ -5,12 +5,13 @@ from pathlib import Path
 import numpy as np
 
 from roomscan import drift as drift_mod
-from roomscan.lidar_io import camera_points, find_capture, frame_count, load_frames
+from roomscan.lidar_io import camera_points, find_capture, frame_count, load_frames, load_rgb
 from roomscan.output import assemble, render
 from roomscan.plan2d import Cloud, build_plan
 
 MAX_POINTS = 8_000_000
 TARGET_FRAMES = 600     # Stray records at 60 fps; neighbouring frames add little
+DAMAGE_VIEWS = 20
 
 
 def _device(capture: Path) -> str:
@@ -23,7 +24,8 @@ def _device(capture: Path) -> str:
     return "iPhone Pro (LiDAR)"
 
 
-def process(capture: Path, out_dir: Path, drift: bool = True, stride: int | None = None) -> dict:
+def process(capture: Path, out_dir: Path, drift: bool = True, stride: int | None = None,
+            damage: bool = True, **_) -> dict:
     capture = find_capture(Path(capture))
     if stride is None:
         stride = max(1, -(-frame_count(capture) // TARGET_FRAMES))
@@ -44,11 +46,17 @@ def process(capture: Path, out_dir: Path, drift: bool = True, stride: int | None
     cloud = Cloud(np.stack([pts[:, 0], -pts[:, 2]], 1).astype(np.float64), pts[:, 1].astype(np.float64),
                   np.stack([nrm[:, 0], -nrm[:, 2], nrm[:, 1]], 1).astype(np.float64), src)
     cams = np.array([[T[0, 3], -T[2, 3]] for T in poses])
-    rooms, adjacency, _, _ = build_plan(cloud, cams, np.array([f.index for f in frames]))
+    rooms, adjacency, theta, _, floor = build_plan(cloud, cams, np.array([f.index for f in frames]))
     if not rooms:
         raise RuntimeError("no rooms recovered from capture")
 
     doc = assemble(capture, "lidar", _device(capture), rooms, adjacency, drift_info)
+    if damage:
+        from roomscan.damage import View, run
+        pick = np.linspace(0, len(frames) - 1, min(DAMAGE_VIEWS, len(frames))).astype(int)
+        rgbs = load_rgb(capture, [frames[i].index for i in pick])
+        views = [View(rgb, frames[i].depth, frames[i].K, poses[i]) for i, rgb in zip(pick, rgbs) if rgb is not None]
+        run(doc, views, rooms, theta, floor)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     render(doc, out_dir / "plan.png")

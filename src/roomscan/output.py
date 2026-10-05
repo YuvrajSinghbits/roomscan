@@ -37,6 +37,8 @@ def room_doc(room, origin):
             off, off_hw = op.s0 - start, _hyp(lines[op.line - 1].hw, op.hw0)
         else:
             off, off_hw = start - op.s1, _hyp(lines[op.line - 1].hw, op.hw1)
+        if getattr(op, "offset_override", None):
+            off, off_hw = op.offset_override
         o = {"id": op.id, "wall_id": f"{room.id}_w{op.line + 1}", "type": op.kind,
              "offset": measurement(off, off_hw), "width": measurement(op.s1 - op.s0, _hyp(op.hw0, op.hw1))}
         if op.height is not None:
@@ -94,6 +96,30 @@ def assemble(capture: Path, tier: str, device: str, rooms, adjacency, drift: dic
         "concealed_damage_flags": [],
         "scope": [],
     }
+
+
+def widen(doc, rel: float, abs_: float):
+    """Add a tier's error model (90% half-widths) in quadrature to every measurement.
+
+    rel is relative to a length; areas get 2*rel (both dimensions scale).
+    """
+    def walk(x):
+        if isinstance(x, dict):
+            if {"value", "lo", "hi", "unit"} <= x.keys() and x["unit"] in ("m", "m2"):
+                v = x["value"]
+                r = rel * (2 if x["unit"] == "m2" else 1)
+                a = abs_ * (np.sqrt(max(v, 0)) * 2 if x["unit"] == "m2" else 1)
+                add = float(np.hypot(r * abs(v), a))
+                x["lo"] = round(v - float(np.hypot(v - x["lo"], add)), 4)
+                x["hi"] = round(v + float(np.hypot(x["hi"] - v, add)), 4)
+            for y in x.values():
+                walk(y)
+        elif isinstance(x, list):
+            for y in x:
+                walk(y)
+    walk(doc)
+    doc["stitched_plan"]["error_model"] = {"rel": rel, "abs_m": abs_}
+    return doc
 
 
 def _xf(t, pts):

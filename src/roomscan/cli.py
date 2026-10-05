@@ -54,11 +54,12 @@ def main(argv=None):
     r.add_argument("--out", type=Path)
     r.add_argument("--no-drift-correction", dest="drift", action="store_false",
                    help="ablation: use the device poses as recorded")
+    r.add_argument("--no-damage", dest="damage", action="store_false", help="skip damage detection (faster)")
     args = ap.parse_args(argv)
 
     tier = args.tier or detect_tier(args.capture)
     out = args.out or Path("out") / args.capture.stem
-    result = run(args.capture, tier, out, drift=args.drift)
+    result = run(args.capture, tier, out, drift=args.drift, damage=args.damage)
     print(f"[{tier}] {len(result['rooms'])} rooms -> {out / 'result.json'}")
 
 
