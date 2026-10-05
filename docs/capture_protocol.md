@@ -11,7 +11,7 @@ Follow this literally. You need an iPhone 15 or newer (Pro / Pro Max for the LiD
 
 ## Tier 1 — Photos (any iPhone 15+, native Camera app)
 Per room, take **4 to 8 photos** with the **1x lens** (not 0.5x, no zoom, no Portrait mode, Live Photos off):
-1. Stand in each **corner** and photograph the opposite corner, so floor and ceiling lines are both visible. (4 photos for a 4-corner room.)
+1. Stand in each **corner** with **both heels touching the two walls**, hold the phone at chest height and photograph the **opposite corner**, so the floor line and the ceiling line are both in the picture. (4 photos for a 4-corner room.)
 2. For **every doorway that leads to another captured room**, stand 1–2 m back and take one photo with the **whole door frame visible, top to floor**. This is how rooms are joined together — do not skip it.
 3. If a room has visible damage, add one photo of each damaged area from about 1.5 m away.
 
@@ -32,14 +32,15 @@ Settings → Camera → Record Video: **1080p at 30 fps**. 1x lens. Do not use C
 
 Hand-off: `data/raw/<property>_video.MOV`
 
-## Tier 3 — LiDAR (iPhone Pro, "3D Scanner App" by Laan Labs, free)
-1. Install **3D Scanner App** from the App Store. Allow camera access.
-2. Choose the **LiDAR** mode. Settings: resolution 5 mm, max depth 5 m, confidence High.
-3. Press record in the first room. Walk the same path as the video tier: along the walls, one floor-to-ceiling tilt per room, through doorways, end where you started.
-4. Move slowly; if the app shows "Slow down", stop for one second.
-5. Stop, let it process, then **Share → Export → All Data** (raw frames, depth, poses). Save the zip.
+## Tier 3 — LiDAR (iPhone Pro / Pro Max, "Stray Scanner", free)
+1. Install **Stray Scanner** (by Stray Robots) from the App Store. Allow camera access.
+2. Press the record button in the first room. Walk the same path as the video tier: along the walls, one slow floor-to-ceiling tilt per room, through every doorway, and **end where you started, facing the same way** (this closes the loop).
+3. Tilt up to the ceiling at least once per room — a room whose ceiling is never seen gets only a lower bound on its height.
+4. Move slowly; about 30–45 s per room.
+5. Stop. On a Mac or PC, connect the phone, open **Files → On My iPhone → Stray Scanner**, and copy the scan folder (it holds `rgb.mp4`, `odometry.csv`, `depth/`, `confidence/`). Or zip it in the Files app and AirDrop/Drive it.
 
-Hand-off: unzip into `data/raw/<property>_lidar/` (it contains `info.json`, `frame_*.jpg`, `frame_*.json`, `depth_*.png`).
+Hand-off: put the folder (or unzip the zip) under `data/raw/<property>_lidar/`.
+(3D Scanner App "All Data" exports are also accepted.)
 
 ## Then run
 ```
