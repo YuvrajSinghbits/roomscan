@@ -141,6 +141,11 @@ narrow, and that is reported as a miss, not tuned away silently.
 * **Photo tier off-protocol**: the proxy photos are walkthrough frames, not
   corner photos, so the corner model does not apply and dimensions are
   underestimated. The protocol's stance instruction exists for this reason.
+* **Photo tier unvalidated on protocol input**: the sample footage has no
+  corner-stance frames. Selecting the frames nearest each corner and facing the
+  room (`stray_to_photos.py ... corners`) yields 0–1 per room, against the
+  protocol's 4, and errors stay at −51…+75%. A room with no two measurable walls
+  gets a labelled placeholder size, never a silent number.
 * **Rooms only partly scanned** become rectangles bounded by the seen walls,
   with ±25 cm on unseen sides.
 * **Doors the walk does not cross** are not found (LiDAR and video); real-data

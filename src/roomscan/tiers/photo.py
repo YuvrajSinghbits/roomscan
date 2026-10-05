@@ -325,6 +325,8 @@ def process(capture: Path, out_dir: Path, **_) -> dict:
             spread_floor = 0.5
         else:
             spread_floor = 0.0
+        unmeasured = not any(s.dims for s in shots) and len(
+            [d for s in shots for d in s.extra.get("walls", {}).values()]) < 2
         small = np.array([min(c) for c in corners])
         large = np.array([max(c) for c in corners])
         W, L = float(np.median(small)), float(np.median(large))
@@ -334,7 +336,8 @@ def process(capture: Path, out_dir: Path, **_) -> dict:
             sp = np.std(v) / np.sqrt(n) if n > 1 else 0.10
             return float(Z90 * np.sqrt(sp ** 2 + CORNER_OFFSET_SIG ** 2) + spread_floor)
         hs = [s.ceiling - s.floor for s in shots if s.ceiling is not None and s.floor is not None]
-        info[name] = {"W": W, "L": L, "hwW": hw(small), "hwL": hw(large), "n_corner": n,
+        info[name] = {"W": W, "L": L, "hwW": hw(small), "hwL": hw(large), "n_corner": 0 if unmeasured else n,
+                      "unmeasured": unmeasured,
                       "heights": hs, "kinds": [s.kind for s in shots]}
         sizes[name] = (W, L)
 
@@ -386,6 +389,12 @@ def process(capture: Path, out_dir: Path, **_) -> dict:
                    {"method": "not applicable: independent stills, rooms placed via door-view matching",
                     "photo_analysis": {n: {k: v for k, v in info[n].items()} for n in info}})
     widen(doc, PHOTO_REL, PHOTO_ABS)
+    for rd in doc["rooms"]:
+        if info[rd["name"]]["unmeasured"]:
+            # no two walls visible in any photo: the size is a placeholder, say so
+            rd["floor_area"]["note"] = "no walls measurable in this room's photos; placeholder size"
+            for w in rd["walls"]:
+                w["length"]["note"] = "placeholder: no wall measurable in this room's photos"
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     render(doc, out_dir / "plan.png")

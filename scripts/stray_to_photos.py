@@ -7,7 +7,11 @@ true 35 mm-equivalent focal length in EXIF -- what an iPhone photo carries.
 These are walkthrough frames, not the protocol's corner photos, so the photo
 tier is exercised on a harder input than it is designed for.
 
-    python scripts/stray_to_photos.py <stray capture> <out folder> [per_room]
+    python -m scripts.stray_to_photos <stray capture> <out folder> [per_room] [corners]
+
+mode "corners": per room corner, the frame taken closest to it (within
+CORNER_R) that faces the room centre -- the nearest this footage gets to the
+protocol's corner photo. The photo tier itself never sees LiDAR information.
 """
 import sys
 from pathlib import Path
@@ -23,7 +27,10 @@ from roomscan.plan2d import Cloud, build_plan, rotate, vertices
 from scripts.stray_to_video import upright_rotation
 
 
-def main(src, dst, per_room=6):
+CORNER_R = 0.7
+
+
+def main(src, dst, per_room=6, mode="far"):
     root = find_capture(Path(src))
     frames = load_frames(root, stride=max(1, -(-frame_count(root) // 600)))
     cam = [camera_points(f, step=2) for f in frames]
@@ -44,15 +51,29 @@ def main(src, dst, per_room=6):
         inside = np.nonzero(MPath(vertices(room.lines)).contains_points(cams_r))[0]
         if not len(inside):
             continue
-        depth = np.array([np.median(frames[i].depth[frames[i].depth > 0]) if (frames[i].depth > 0).any() else 0
-                          for i in inside])
-        order = inside[np.argsort(-depth)]
-        chosen = []
-        for i in order:   # far-seeing views, at least 60 degrees apart in heading
-            if all(abs(np.angle(np.exp(1j * (heading[i] - heading[j])))) > np.deg2rad(60) for j in chosen):
-                chosen.append(i)
-            if len(chosen) == per_room:
-                break
+        if mode == "corners":
+            poly = vertices(room.lines)
+            centre = poly.mean(0)
+            chosen = []
+            for corner in poly:
+                d = np.linalg.norm(cams_r[inside] - corner, axis=1)
+                to_c = np.arctan2(*(centre - cams_r[inside]).T[::-1])
+                facing = np.abs(np.angle(np.exp(1j * (heading[inside] - to_c)))) < np.deg2rad(35)
+                ok = (d < CORNER_R) & facing
+                if ok.any():
+                    i = inside[ok][np.argmin(d[ok])]
+                    if i not in chosen:
+                        chosen.append(i)
+        else:
+            depth = np.array([np.median(frames[i].depth[frames[i].depth > 0]) if (frames[i].depth > 0).any() else 0
+                              for i in inside])
+            order = inside[np.argsort(-depth)]
+            chosen = []
+            for i in order:   # far-seeing views, at least 60 degrees apart in heading
+                if all(abs(np.angle(np.exp(1j * (heading[i] - heading[j])))) > np.deg2rad(60) for j in chosen):
+                    chosen.append(i)
+                if len(chosen) == per_room:
+                    break
         out = dst / room.id
         out.mkdir(parents=True, exist_ok=True)
         for k, (i, rgb) in enumerate(zip(chosen, load_rgb(root, [frames[i].index for i in chosen], width=1920))):
@@ -67,4 +88,5 @@ def main(src, dst, per_room=6):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2], *(int(x) for x in sys.argv[3:]))
+    args = sys.argv[3:]
+    main(sys.argv[1], sys.argv[2], int(args[0]) if args else 6, args[1] if len(args) > 1 else "far")

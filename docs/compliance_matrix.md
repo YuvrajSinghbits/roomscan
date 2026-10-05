@@ -24,7 +24,7 @@ known gaps stated; **Not met** = missing, with the reason.
 | 17 | Gate: openings ≤ 2 cm on ≥ 85% | plan2d.py | synthetic test | Partial — met on synthetic (≤ 1 cm); unscored on real data (no ground truth) |
 | 18 | Gate: ceiling ≤ 1.5 cm, repeat spread ≤ 1 cm | plan2d.py (`room_level`) | synthetic test | Partial — met on synthetic; no repeat capture available |
 | 19 | Gate: repeatability (two captures, ≤ 1 cm / 0.5%) | scripts/repeatability.py | docs/repeatability.md | Measured, **fails**: 4/13 walls within gate, median 2.2 cm; diagnosed as unrepeatable (surface choice), not biased |
-| 20 | Gate: photo-tier stitch, footprint ±8%, calibrated | photo.py | benchmark_results.md | Partial — runs; accuracy measured only against LiDAR on proxy photos |
+| 20 | Gate: photo-tier stitch, footprint ±8%, calibrated | photo.py | benchmark_results.md | **Fails on proxy input** (−56…−74% vs LiDAR); the sample footage has no corner-stance frames (0–1 per room), so the tier is unvalidated on protocol photos |
 | 21 | Benchmark set built by us (multi-room, damage room, all tiers, repeat, tape truth) | docs/ground_truth_template.csv, scripts/run_all.sh | benchmark_results.md | Partial — uses the provided sample captures; video/photo derived from the same footage; no tape truth, no staged damage, no repeat |
 | 22 | Head-to-head vs a consumer app on 2 rooms | — | — | Not met — needs an iPhone capture with the consumer app on rooms we can access |
 | 23 | Fix loop: worst gate, root cause, fix, before/after regenerable | docs/fix_loop.md, damage.py `PROFILES` | `out/fixloop_*`, benchmark_results.md | Done (on the gate we can measure: damage phantoms) |
