@@ -5,7 +5,7 @@
 Tier is auto-detected when omitted:
   * a folder of room sub-folders containing only images -> photo
   * a single .mov/.mp4 file                           -> video
-  * a 3D Scanner App / Record3D raw export              -> lidar
+  * a Stray Scanner / 3D Scanner App raw export        -> lidar
 """
 import argparse
 import json
@@ -25,7 +25,7 @@ def detect_tier(path: Path) -> str:
         return "video"
     if path.is_dir():
         files = [p for p in path.rglob("*") if p.is_file()]
-        if any(p.suffix.lower() in {".depth", ".exr", ".npy"} or p.name == "info.json" for p in files):
+        if any(p.suffix.lower() in {".depth", ".exr", ".npy"} or p.name in {"info.json", "odometry.csv"} for p in files):
             return "lidar"
         if files and all(p.suffix.lower() in IMAGE_EXT for p in files):
             return "photo"

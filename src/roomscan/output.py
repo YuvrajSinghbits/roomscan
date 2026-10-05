@@ -49,10 +49,21 @@ def room_doc(room, origin):
         "name": room.name,
         "polygon": [[round(float(x), 4) for x in p - origin] for p in v],
         "walls": walls,
-        "ceiling_height": measurement(room.ceiling - room.floor, room.height_hw),
+        "ceiling_height": _ceiling(room),
         "floor_area": measurement(area, area_hw, "m2"),
         "openings": openings,
     }
+
+
+CEILING_UNSEEN_SPAN = 0.8
+
+
+def _ceiling(room):
+    h = room.ceiling - room.floor
+    if room.ceiling_seen:
+        return measurement(h, room.height_hw)
+    return {"value": round(h, 4), "lo": round(h, 4), "hi": round(h + CEILING_UNSEEN_SPAN, 4), "unit": "m",
+            "note": "ceiling not observed; value is a lower bound from the highest wall point"}
 
 
 def assemble(capture: Path, tier: str, device: str, rooms, adjacency, drift: dict, render_name="plan.png"):

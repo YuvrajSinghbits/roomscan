@@ -1,6 +1,14 @@
-"""Loader for 3D Scanner App (Laan Labs) "All Data" exports.
+"""Loaders for raw LiDAR exports: Stray Scanner and 3D Scanner App (Laan Labs).
 
-Layout per frame i (5-digit index):
+Stray Scanner (one folder per scan):
+    odometry.csv   timestamp, frame, x, y, z, qx, qy, qz, qw, fx, fy, cx, cy, ...
+                   camera-to-world, camera axes in the OpenCV convention
+                   (x right, y down, z forward); intrinsics at RGB resolution
+    depth/NNNNNN.png       uint16 millimetres, 256x192
+    confidence/NNNNNN.png  uint8 ARKit confidence 0/1/2
+    rgb.mp4, imu.csv, camera_matrix.csv
+
+3D Scanner App "All Data", per frame i (5-digit index):
     frame_i.jpg    RGB
     frame_i.json   {"cameraPoseARFrame": 16 floats, "intrinsics": 9 floats, ...}
     depth_i.png    uint16 millimetres, low-res (256x192 on current devices)
@@ -9,6 +17,7 @@ Layout per frame i (5-digit index):
 Conventions are ARKit's: world is gravity-aligned with +y up; the camera looks
 down its -z axis with +y up, so pixel rows (v grows downward) map to -y.
 """
+import csv
 import json
 import re
 from dataclasses import dataclass
@@ -47,6 +56,78 @@ def _read_depth(path: Path) -> np.ndarray:
     return np.asarray(Image.open(path), dtype=np.float32) / 1000.0
 
 
+# Stray poses use OpenCV camera axes; right-multiplying flips them to ARKit's.
+CV_TO_ARKIT = np.diag([1.0, -1.0, -1.0, 1.0])
+RGB_WIDTHS = (1920, 1440, 3840, 4032)
+
+
+def _depth_intrinsics(K: np.ndarray, depth_w: int) -> np.ndarray:
+    """Scale RGB-resolution intrinsics to the depth map.
+
+    The RGB width is not stored per frame; 2*cx is within ~1% of it, so snap to
+    the nearest standard ARKit video width (a 0.5% scale error would cost
+    ~1 cm on a 2 m wall).
+    """
+    w = 2.0 * K[0, 2]
+    snap = min(RGB_WIDTHS, key=lambda x: abs(x - w))
+    if abs(snap - w) / snap < 0.03:
+        w = snap
+    Kd = K.copy()
+    Kd[:2] *= depth_w / w
+    return Kd
+
+
+def find_capture(path: Path) -> Path:
+    """The folder that actually holds the frames (unzipped exports nest one level)."""
+    path = Path(path)
+    for marker in ("odometry.csv", "info.json"):
+        if (path / marker).exists():
+            return path
+    for marker in ("odometry.csv", "info.json"):
+        hits = sorted(path.rglob(marker))
+        if hits:
+            return hits[0].parent
+    return path
+
+
+def is_stray(root: Path) -> bool:
+    return (Path(root) / "odometry.csv").exists()
+
+
+def _stray_rows(root: Path):
+    with open(root / "odometry.csv", newline="") as fh:
+        rows = list(csv.reader(fh))
+    head = [h.strip() for h in rows[0]]
+    return [{k: v.strip() for k, v in zip(head, r)} for r in rows[1:] if r]
+
+
+def frame_count(root: Path) -> int:
+    root = Path(root)
+    return len(_stray_rows(root)) if is_stray(root) else len(frame_indices(root))
+
+
+def _load_stray(root: Path, stride: int, min_conf: int) -> list[Frame]:
+    from scipy.spatial.transform import Rotation
+
+    frames = []
+    for r in _stray_rows(root)[::stride]:
+        i = int(r["frame"])
+        dp = root / "depth" / f"{i:06d}.png"
+        if not dp.exists():
+            continue
+        depth = _read_depth(dp)
+        cp = root / "confidence" / f"{i:06d}.png"
+        conf = np.asarray(Image.open(cp)) if cp.exists() else None
+        if conf is not None:
+            depth = np.where(conf >= min_conf, depth, 0.0)
+        T = np.eye(4)
+        T[:3, :3] = Rotation.from_quat([float(r[k]) for k in ("qx", "qy", "qz", "qw")]).as_matrix()
+        T[:3, 3] = [float(r[k]) for k in ("x", "y", "z")]
+        K = np.array([[float(r["fx"]), 0, float(r["cx"])], [0, float(r["fy"]), float(r["cy"])], [0, 0, 1]])
+        frames.append(Frame(i, T @ CV_TO_ARKIT, _depth_intrinsics(K, depth.shape[1]), depth, conf, None))
+    return frames
+
+
 def frame_indices(root: Path) -> list[int]:
     idx = []
     for p in root.glob("frame_*.json"):
@@ -57,7 +138,12 @@ def frame_indices(root: Path) -> list[int]:
 
 
 def load_frames(root: Path, stride: int = 1, min_conf: int = 2) -> list[Frame]:
-    root = Path(root)
+    root = find_capture(root)
+    if is_stray(root):
+        frames = _load_stray(root, stride, min_conf)
+        if not frames:
+            raise FileNotFoundError(f"no frames with depth found in {root}")
+        return frames
     frames = []
     for i in frame_indices(root)[::stride]:
         stem = f"{i:05d}"
@@ -71,12 +157,7 @@ def load_frames(root: Path, stride: int = 1, min_conf: int = 2) -> list[Frame]:
         if conf is not None:
             depth = np.where(conf >= min_conf, depth, 0.0)
 
-        K = np.asarray(meta["intrinsics"], dtype=np.float64).reshape(3, 3)
-        # Intrinsics are given at RGB resolution; principal point ~ image centre,
-        # so 2*cx recovers the RGB width and gives the scale to depth resolution.
-        s = depth.shape[1] / (2.0 * K[0, 2])
-        Kd = K.copy()
-        Kd[:2] *= s
+        Kd = _depth_intrinsics(np.asarray(meta["intrinsics"], dtype=np.float64).reshape(3, 3), depth.shape[1])
         img = root / f"frame_{stem}.jpg"
         frames.append(Frame(i, _pose(meta["cameraPoseARFrame"]), Kd, depth, conf,
                             img if img.exists() else None))

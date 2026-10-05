@@ -34,6 +34,14 @@ SIG_WALL_SYS = 0.005
 SIG_LEVEL_SYS = 0.004
 SIG_EDGE_SYS = 0.005
 N_EFF_MAX = 150        # neighbouring points are correlated; cap effective n
+# A side of the outline with no wall surface behind it (unscanned, occluded,
+# open to an unscanned space) is not a measured wall: its true position is
+# unknown, so it carries this half-width instead of a fitted one.
+UNSUPPORTED_HW = 0.25
+MIN_WALL_PTS = 40
+MIN_WALL_COVER = 0.35
+# Wall fits use surfaces above typical furniture (beds, sofas, desks, counters)
+WALL_FIT_MIN_H = 0.9
 
 
 @dataclass
@@ -41,6 +49,7 @@ class Cloud:
     xy: np.ndarray       # (N,2) plan coordinates
     h: np.ndarray        # (N,) height (absolute until floor is known)
     n: np.ndarray        # (N,3) normals (nX, nY, nh), facing the camera
+    src: np.ndarray | None = None   # (N,) index of the camera that saw each point
 
 
 @dataclass
@@ -50,6 +59,11 @@ class Line:
     inward: int          # +1 / -1: direction of room interior along the normal axis
     hw: float = 0.05     # 90% half-width of c
     n_pts: int = 0
+    cover: float = 0.0   # fraction of the wall's length backed by surface points
+
+    @property
+    def supported(self) -> bool:
+        return self.n_pts >= MIN_WALL_PTS and self.cover >= MIN_WALL_COVER
 
 
 @dataclass
@@ -76,6 +90,7 @@ class Room:
     floor: float = 0.0
     ceiling: float = 0.0
     height_hw: float = 0.0
+    ceiling_seen: bool = True
     first_frame: int = 0
 
 
@@ -132,8 +147,8 @@ def floor_ceiling(cloud: Cloud):
         raise ValueError("no floor surface observed")
     floor = _refine_level(up, hist_lo)[0]
     ceil_guess = _peak(down, floor + 1.8, floor + 4.5)
-    if ceil_guess is None:
-        raise ValueError("no ceiling surface observed")
+    if ceil_guess is None or (np.abs(down - ceil_guess) < 0.05).sum() < 200:
+        return floor, None
     ceiling = _refine_level(down, ceil_guess)[0]
     return floor, ceiling
 
@@ -171,6 +186,33 @@ def _disk(radius_m):
     return x * x + y * y <= r * r
 
 
+def carve_free(g: Grid, cloud: Cloud, cams_xy: np.ndarray, n_rays=300_000, stop=0.06, seed=0):
+    """2D free-space carving: the plan projection of every camera->point ray is empty.
+
+    Independent of whether floor or ceiling were scanned. Rays stop `stop` short
+    of the hit so the hit surface itself is not carved.
+    """
+    count = np.zeros(g.shape[0] * g.shape[1], np.int32)
+    if cloud.src is None:
+        return count.reshape(g.shape)
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(len(cloud.h), min(n_rays, len(cloud.h)), replace=False)
+    a, b = cams_xy[cloud.src[idx]], cloud.xy[idx]
+    L = np.linalg.norm(b - a, axis=1)
+    ok = L > stop + CELL
+    a, b, L = a[ok], b[ok], L[ok]
+    steps = int(np.ceil(L.max() / (CELL / 2))) if len(L) else 0
+    for i0 in range(0, len(L), 20_000):
+        sa, sb, sl = a[i0:i0 + 20_000], b[i0:i0 + 20_000], L[i0:i0 + 20_000]
+        t = np.linspace(0, 1, steps)[None, :]
+        keep = t <= (1 - stop / sl)[:, None]
+        pts = sa[:, None, :] + t[..., None] * (sb - sa)[:, None, :]
+        pts = pts[np.broadcast_to(keep, pts.shape[:2])]
+        r, c, ok2 = g.idx(pts)
+        count += np.bincount(r[ok2] * g.shape[1] + c[ok2], minlength=count.size).astype(np.int32)
+    return count.reshape(g.shape)
+
+
 def segment_rooms(cloud: Cloud, ceiling: float, cams_xy: np.ndarray, door_max=0.95):
     g = Grid(cloud.xy)
     nh = cloud.n[:, 2]
@@ -180,7 +222,7 @@ def segment_rooms(cloud: Cloud, ceiling: float, cams_xy: np.ndarray, door_max=0.
                             ((nh < -0.9) & (np.abs(cloud.h - ceiling) < 0.08))]) >= 1
     soffit = g.count(cloud.xy[(nh < -0.9) & (cloud.h > 1.75) & (cloud.h < ceiling - 0.12)]) >= 2
 
-    free = ndimage.binary_closing(seen, _disk(0.10), border_value=0)
+    free = ndimage.binary_closing(seen | (carve_free(g, cloud, cams_xy) >= 3), _disk(0.10), border_value=0)
     free = ndimage.binary_fill_holes(free)
     wall_d = ndimage.binary_dilation(wall, _disk(0.05))
     free &= ~wall_d
@@ -188,23 +230,25 @@ def segment_rooms(cloud: Cloud, ceiling: float, cams_xy: np.ndarray, door_max=0.
     cut = free & ~ndimage.binary_dilation(soffit, _disk(0.05))
     dist = ndimage.distance_transform_edt(cut) * CELL
     seeds, n = ndimage.label(dist > door_max / 2)
-    # keep seeds the camera actually walked through (rooms only glimpsed through a door are dropped)
-    r, c, ok = g.idx(cams_xy)
-    visited = np.zeros(n + 1, int)
-    np.add.at(visited, seeds[r[ok], c[ok]], 1)
-    sizes = ndimage.sum(np.ones_like(seeds), seeds, index=np.arange(n + 1)) * CELL ** 2
-    keep = [i for i in range(1, n + 1) if visited[i] >= 3 and sizes[i] >= 0.15]
-    labels = np.zeros_like(seeds)
-    for k, i in enumerate(keep, 1):
-        labels[seeds == i] = k
-    # grow seeds back over free space; competing fronts meet mid-doorway
+    # grow every seed back over free space; competing fronts meet mid-doorway
+    labels = seeds.copy()
     struct = ndimage.generate_binary_structure(2, 1)
-    for _ in range(200):
+    for _ in range(400):
         grown = ndimage.grey_dilation(labels, footprint=struct)
         new = (labels == 0) & free & (grown > 0)
         if not new.any():
             break
         labels[new] = grown[new]
+    # keep spaces the camera actually walked through; space only glimpsed
+    # through an opening grew as its own seed and is dropped here
+    r, c, ok = g.idx(cams_xy)
+    visited = np.zeros(n + 1, int)
+    np.add.at(visited, labels[r[ok], c[ok]], 1)
+    sizes = ndimage.sum(np.ones_like(seeds), seeds, index=np.arange(n + 1)) * CELL ** 2
+    keep = [i for i in range(1, n + 1) if visited[i] >= 3 and sizes[i] >= 0.15]
+    lut = np.zeros(n + 1, labels.dtype)
+    lut[keep] = np.arange(1, len(keep) + 1)
+    labels = lut[labels]
     return g, labels, len(keep), wall
 
 
@@ -313,26 +357,63 @@ def _axis_vals(cloud, axis):
 
 
 def refine_lines(lines, cloud: Cloud, ceiling: float, iters=2):
-    """Fit each wall to its room-facing surface points; set its interval."""
+    """Fit each wall to its room-facing surface points; set its interval and support."""
     for _ in range(iters):
         new = []
         for k, ln in enumerate(lines):
             s0, s1 = sorted(line_span(lines, k))
             q, s, nq, _ = _axis_vals(cloud, ln.axis)
             sel = ((nq * ln.inward > 0.85) & (np.abs(q - ln.c) < 0.25) &
-                   (s > s0 + 0.12) & (s < s1 - 0.12) & (cloud.h > 0.1) & (cloud.h < ceiling - 0.12))
-            v = q[sel]
+                   (s > s0 + 0.12) & (s < s1 - 0.12) & (cloud.h > WALL_FIT_MIN_H) & (cloud.h < ceiling - 0.12))
+            v, vs = q[sel], s[sel]
             if len(v) < 30:
-                new.append(Line(ln.axis, ln.c, ln.inward, max(ln.hw, 0.05), len(v)))
+                new.append(Line(ln.axis, ln.c, ln.inward, UNSUPPORTED_HW, len(v), 0.0))
                 continue
             # nearest surface on the room side of the current estimate wins
             m = np.median(v)
-            v = v[np.abs(v - m) < 0.03]
+            inl = np.abs(v - m) < 0.03
+            v, vs = v[inl], vs[inl]
             c = float(v.mean())
             se = v.std() / np.sqrt(min(len(v), N_EFF_MAX))
-            new.append(Line(ln.axis, c, ln.inward, Z90 * np.hypot(se, SIG_WALL_SYS), len(v)))
+            nb = max(1, int((s1 - s0) / 0.1))
+            hist, _ = np.histogram(vs, bins=nb, range=(s0, s1))
+            ln2 = Line(ln.axis, c, ln.inward, Z90 * np.hypot(se, SIG_WALL_SYS), len(v), float((hist >= 2).mean()))
+            if not ln2.supported:
+                ln2.hw = UNSUPPORTED_HW
+            new.append(ln2)
         lines = new
     return lines
+
+
+def prune_unsupported(lines, cloud: Cloud, ceiling: float, max_iter=60):
+    """Remove outline sides that no wall surface backs, shortest first.
+
+    The two parallel neighbours of a removed side merge onto the better
+    supported one; on a tie the outer one, since unscanned floor next to a
+    wall is usually furniture or occlusion rather than a missing room.
+    """
+    lines = refine_lines(lines, cloud, ceiling)
+    for _ in range(max_iter):
+        n = len(lines)
+        if n <= 4:
+            break
+        lens = [abs(lines[(k + 1) % n].c - lines[k - 1].c) for k in range(n)]
+        cand = [k for k in range(n) if not lines[k].supported]
+        if not cand:
+            break
+        k = min(cand, key=lambda j: lens[j])
+        i0, i2 = (k - 1) % n, (k + 1) % n
+        a, b = lines[i0], lines[i2]
+        if a.supported != b.supported:
+            keep = a if a.supported else b
+        elif a.n_pts * a.cover != b.n_pts * b.cover and (a.supported and b.supported):
+            keep = a if a.n_pts * a.cover > b.n_pts * b.cover else b
+        else:
+            keep = a if a.c * a.inward < b.c * b.inward else b      # outer
+        merged = Line(keep.axis, keep.c, keep.inward, keep.hw, keep.n_pts, keep.cover)
+        lines = [merged if i == i0 else lines[i] for i in range(n) if i not in (k, i2)]
+        lines = remove_jogs(refine_lines(lines, cloud, ceiling, iters=1), tol=0.10)
+    return refine_lines(lines, cloud, ceiling)
 
 
 # --------------------------------------------------------------- openings
@@ -510,14 +591,20 @@ def build_plan(cloud: Cloud, cams_xy: np.ndarray, cam_frames: np.ndarray):
     vert = np.abs(cloud.n[:, 2]) < 0.3
     theta = manhattan_angle(cloud.n[vert, :2])
     cloud = Cloud(rotate(cloud.xy, theta), cloud.h.copy(),
-                  np.concatenate([rotate(cloud.n[:, :2], theta), cloud.n[:, 2:]], 1))
+                  np.concatenate([rotate(cloud.n[:, :2], theta), cloud.n[:, 2:]], 1), cloud.src)
     cams_xy = rotate(cams_xy, theta)
 
     floor, ceiling = floor_ceiling(cloud)
     cloud.h -= floor
-    ceiling -= floor
+    ceiling_seen = ceiling is not None
+    if ceiling_seen:
+        ceiling -= floor
+    else:
+        # ceiling never scanned: the top of the observed walls is a lower bound
+        ceiling = float(np.percentile(cloud.h[vert & (cloud.h > 0.5)], 99.5)) + 0.02
 
     g, labels, n, _ = segment_rooms(cloud, ceiling, cams_xy)
+    wall_pts = (np.abs(cloud.n[:, 2]) < 0.3) & (cloud.h > 0.1) & (cloud.h < ceiling - 0.12)
     rooms = []
     r, c, ok = g.idx(cams_xy)
     for i in range(1, n + 1):
@@ -531,13 +618,21 @@ def build_plan(cloud: Cloud, cams_xy: np.ndarray, cam_frames: np.ndarray):
         if sm.sum() * CELL ** 2 < 1.0:
             continue
         lines = remove_jogs(_to_lines(_trace(sm), g))
-        lines = refine_lines(lines, cloud, ceiling)
+        v0 = vertices(lines)
+        lo, hi = v0.min(0) - 0.5, v0.max(0) + 0.5
+        near = wall_pts & np.all((cloud.xy > lo) & (cloud.xy < hi), axis=1)
+        wc = Cloud(cloud.xy[near], cloud.h[near], cloud.n[near])
+        lines = prune_unsupported(lines, wc, ceiling)
         lines = remove_jogs(lines, tol=0.10)
         hit = ok.copy()
         hit[ok] = labels[r[ok], c[ok]] == i
         first = int(cam_frames[hit].min()) if hit.any() else 10 ** 9
-        f, cl, hhw = room_level(cloud, g, mask, 0.0, ceiling)
-        rooms.append(Room("", "", mask, lines, floor=f, ceiling=cl, height_hw=hhw, first_frame=first))
+        if ceiling_seen:
+            f, cl, hhw = room_level(cloud, g, mask, 0.0, ceiling)
+        else:
+            f, cl, hhw = 0.0, ceiling - 0.02, 0.0
+        rooms.append(Room("", "", mask, lines, floor=f, ceiling=cl, height_hw=hhw,
+                          ceiling_seen=ceiling_seen, first_frame=first))
 
     # stable naming in walk order; long thin spaces are corridors
     order = sorted(range(len(rooms)), key=lambda j: rooms[j].first_frame)
