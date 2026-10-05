@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "roomscan/capture_output/v0.1",
+  "title": "RoomScan capture output",
+  "description": "One document per capture. Every metric value is a Measurement carrying a confidence interval.",
+  "type": "object",
+  "required": ["schema_version", "capture", "rooms", "stitched_plan", "damage", "concealed_damage_flags", "scope"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "capture": {
+      "type": "object",
+      "required": ["id", "tier", "source", "device"],
+      "properties": {
+        "id": { "type": "string" },
+        "tier": { "enum": ["photo", "video", "lidar"] },
+        "source": { "type": "string", "description": "Path of the raw capture this was produced from" },
+        "device": { "type": "string" },
+        "pipeline_version": { "type": "string" },
+        "runtime_s": { "type": "number" }
+      }
+    },
+    "rooms": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/room" }
+    },
+    "stitched_plan": {
+      "type": "object",
+      "required": ["rooms", "adjacency", "footprint_area", "drift_correction"],
+      "properties": {
+        "rooms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["room_id", "transform"],
+            "properties": {
+              "room_id": { "type": "string" },
+              "transform": {
+                "description": "2D rigid transform room frame -> property frame: [tx, ty, theta_rad]",
+                "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3
+              }
+            }
+          }
+        },
+        "adjacency": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["room_a", "room_b", "via_opening"],
+            "properties": {
+              "room_a": { "type": "string" },
+              "room_b": { "type": "string" },
+              "via_opening": { "type": "string" }
+            }
+          }
+        },
+        "footprint_area": { "$ref": "#/$defs/measurement" },
+        "drift_correction": { "type": "string", "description": "Method applied, or 'none' for ablation runs" },
+        "render": { "type": "string", "description": "Path to rendered plan image" }
+      }
+    },
+    "damage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "surface_id", "class", "area", "confidence"],
+        "properties": {
+          "id": { "type": "string" },
+          "surface_id": { "type": "string" },
+          "class": { "enum": ["water_stain", "crack", "mold", "hole", "peeling_paint", "other"] },
+          "area": { "$ref": "#/$defs/measurement" },
+          "extent": {
+            "description": "Bounding extent on the surface in metres [u_min, v_min, u_max, v_max]",
+            "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4
+          },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "concealed_damage_flags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["surface_id", "rule", "evidence"],
+        "properties": {
+          "surface_id": { "type": "string" },
+          "rule": { "type": "string", "description": "Identifier of the rule that fired" },
+          "evidence": { "type": "array", "items": { "type": "string" }, "description": "Damage ids / surface ids that triggered the rule" }
+        }
+      }
+    },
+    "scope": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["surface_id", "code", "description", "quantity", "unit"],
+        "properties": {
+          "surface_id": { "type": "string" },
+          "code": { "type": "string" },
+          "description": { "type": "string" },
+          "quantity": { "$ref": "#/$defs/measurement" },
+          "unit": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "measurement": {
+      "type": "object",
+      "required": ["value", "lo", "hi", "unit"],
+      "properties": {
+        "value": { "type": "number" },
+        "lo": { "type": "number", "description": "Lower bound of the 90% interval" },
+        "hi": { "type": "number", "description": "Upper bound of the 90% interval" },
+        "unit": { "enum": ["m", "m2", "count"] }
+      }
+    },
+    "point2": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+    "room": {
+      "type": "object",
+      "required": ["id", "name", "polygon", "walls", "ceiling_height", "floor_area", "openings"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "polygon": {
+          "description": "Floor outline in room frame, metres, counter-clockwise",
+          "type": "array", "items": { "$ref": "#/$defs/point2" }
+        },
+        "walls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "start", "end", "length"],
+            "properties": {
+              "id": { "type": "string" },
+              "start": { "$ref": "#/$defs/point2" },
+              "end": { "$ref": "#/$defs/point2" },
+              "length": { "$ref": "#/$defs/measurement" }
+            }
+          }
+        },
+        "ceiling_height": { "$ref": "#/$defs/measurement" },
+        "floor_area": { "$ref": "#/$defs/measurement" },
+        "openings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "wall_id", "type", "offset", "width"],
+            "properties": {
+              "id": { "type": "string" },
+              "wall_id": { "type": "string" },
+              "type": { "enum": ["door", "window", "open_passage"] },
+              "offset": { "$ref": "#/$defs/measurement", "description": "Distance from wall start to opening start" },
+              "width": { "$ref": "#/$defs/measurement" },
+              "height": { "$ref": "#/$defs/measurement" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
