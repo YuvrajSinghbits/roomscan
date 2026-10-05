@@ -108,3 +108,40 @@ def project(f: Frame, pts: np.ndarray):
         u = f.K[0, 0] * pc[:, 0] / z + f.K[0, 2]
         v = -f.K[1, 1] * pc[:, 1] / z + f.K[1, 2]
     return u, v, z
+
+
+def camera_points(f: Frame, step: int = 2, max_depth: float = 5.0, k: int = 2):
+    """Camera-space points and unit normals (N,3)x2, every `step` pixels.
+
+    Normals come from central differences `k` pixels apart in the depth image
+    and are flipped to face the camera, so a wall point's normal says which
+    side of the wall it was seen from. Pixels straddling a depth edge are dropped.
+    """
+    d = f.depth
+    h, w = d.shape
+    v, u = np.mgrid[0:h, 0:w]
+    fx, fy, cx, cy = f.K[0, 0], f.K[1, 1], f.K[0, 2], f.K[1, 2]
+    P = np.stack([(u - cx) / fx * d, -(v - cy) / fy * d, -d], axis=-1)
+    valid = (d > 0.1) & (d < max_depth)
+
+    c = (slice(k, h - k), slice(k, w - k))
+    right, left = (slice(k, h - k), slice(2 * k, w)), (slice(k, h - k), slice(0, w - 2 * k))
+    down, up = (slice(2 * k, h), slice(k, w - k)), (slice(0, h - 2 * k), slice(k, w - k))
+    ok = valid[c] & valid[right] & valid[left] & valid[down] & valid[up]
+    dc = d[c]
+    for nb in (right, left, down, up):
+        ok &= np.abs(d[nb] - dc) < 0.05 * dc + 0.02
+    n = np.cross(P[right] - P[left], P[down] - P[up])
+    norm = np.linalg.norm(n, axis=-1)
+    ok &= norm > 0
+    sub = (slice(None, None, step), slice(None, None, step))
+    ok, n, norm, pts = ok[sub], n[sub], norm[sub], P[c][sub]
+    n = n[ok] / norm[ok][:, None]
+    pts = pts[ok]
+    n[np.einsum("ij,ij->i", n, pts) > 0] *= -1
+    return pts.astype(np.float32), n.astype(np.float32)
+
+
+def to_world(pose: np.ndarray, pts: np.ndarray, normals: np.ndarray):
+    R, t = pose[:3, :3], pose[:3, 3]
+    return pts @ R.T + t, normals @ R.T

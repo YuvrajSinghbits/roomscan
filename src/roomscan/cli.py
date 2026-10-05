@@ -32,16 +32,16 @@ def detect_tier(path: Path) -> str:
     raise SystemExit(f"cannot detect tier for {path}; pass --tier")
 
 
-def run(capture: Path, tier: str, out_dir: Path) -> dict:
+def run(capture: Path, tier: str, out_dir: Path, **opts) -> dict:
     from roomscan.tiers import dispatch
 
     t0 = time.perf_counter()
-    result = dispatch(tier, capture, out_dir)
+    result = dispatch(tier, capture, out_dir, **opts)
     result["capture"]["runtime_s"] = round(time.perf_counter() - t0, 2)
     result["capture"]["pipeline_version"] = __version__
     validate(result)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "result.json").write_text(json.dumps(result, indent=2))
+    (out_dir / "result.json").write_text(json.dumps(result, indent=2, default=float))
     return result
 
 
@@ -52,11 +52,13 @@ def main(argv=None):
     r.add_argument("capture", type=Path)
     r.add_argument("--tier", choices=["photo", "video", "lidar"])
     r.add_argument("--out", type=Path)
+    r.add_argument("--no-drift-correction", dest="drift", action="store_false",
+                   help="ablation: use the device poses as recorded")
     args = ap.parse_args(argv)
 
     tier = args.tier or detect_tier(args.capture)
     out = args.out or Path("out") / args.capture.stem
-    result = run(args.capture, tier, out)
+    result = run(args.capture, tier, out, drift=args.drift)
     print(f"[{tier}] {len(result['rooms'])} rooms -> {out / 'result.json'}")
 
 
