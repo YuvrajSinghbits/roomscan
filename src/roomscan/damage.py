@@ -65,7 +65,7 @@ def segment(rgb: np.ndarray):
     out = {}
     h, w = rgb.shape[:2]
     for i, cls in enumerate(PROMPTS):
-        m = (prob[i] > DAMAGE_THRESH) & (prob[i] > clean_best) & (prob[i] == prob[:nd].max(0))
+        m = (prob[i] > _profile()["thresh"]) & (prob[i] > clean_best) & (prob[i] == prob[:nd].max(0))
         if m.sum() >= MIN_PIXELS:
             ys = (np.arange(h) * m.shape[0] / h).astype(int)
             xs = (np.arange(w) * m.shape[1] / w).astype(int)
@@ -122,6 +122,18 @@ def run(doc, views, rooms, theta, floor):
     return scope.apply(doc)
 
 
+# Fix loop (docs/fix_loop.md): the "before" profile is the first shipped
+# detector; "after" adds the threshold, multi-view and class/surface filters.
+# ROOMSCAN_DAMAGE_PROFILE=before regenerates the before run from this code.
+PROFILES = {"before": {"thresh": 0.45, "min_views": 1, "validity": False},
+            "after": {"thresh": DAMAGE_THRESH, "min_views": MIN_VIEWS, "validity": True}}
+
+
+def _profile():
+    import os
+    return PROFILES[os.environ.get("ROOMSCAN_DAMAGE_PROFILE", "after")]
+
+
 def detect(views, index: SurfaceIndex, max_views=20):
     """Run the detector over (a subset of) views; merge per class and surface."""
     if not views:
@@ -154,7 +166,8 @@ def detect(views, index: SurfaceIndex, max_views=20):
     for (surf, cls), (cs, scores) in sorted(cells.items()):
         area = len(cs) * CELL ** 2
         kind = "floor" if surf.endswith("_floor") else "ceiling" if surf.endswith("_ceiling") else "wall"
-        if area < MIN_AREA or len(scores) < MIN_VIEWS or cls not in VALID[kind]:
+        prof = _profile()
+        if area < MIN_AREA or len(scores) < prof["min_views"] or (prof["validity"] and cls not in VALID[kind]):
             continue
         a = np.array(sorted(cs))
         # boundary cells are half in, half out: that is the extent uncertainty

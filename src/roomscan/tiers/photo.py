@@ -244,7 +244,7 @@ def _overlap(a, b, eps=0.01):
 def layout(sizes, edges):
     """Place rectangles: BFS over door links, each new room against its placed neighbour."""
     names = list(sizes)
-    placed = {names[0]: (0.0, 0.0, *sizes[names[0]])}
+    placed = {names[0]: (0.0, 0.0, *sizes[names[0]])}  # sizes: name -> (W, L)
     side_used = {}
     order = [names[0]]
     pending = set(names[1:])
@@ -254,7 +254,7 @@ def layout(sizes, edges):
             for src, dst in ((a, b), (b, a)):
                 if src in placed and dst in pending:
                     x0, y0, x1, y1 = placed[src]
-                    W, L = sizes[dst][2], sizes[dst][3]
+                    W, L = sizes[dst]
                     best = None
                     for side in ("E", "N", "W", "S"):
                         for (w_, l_) in ((W, L), (L, W)):
@@ -283,7 +283,7 @@ def layout(sizes, edges):
             # unconnected room: put it east of everything
             dst = sorted(pending)[0]
             xmax = max(p[2] for p in placed.values())
-            W, L = sizes[dst][2], sizes[dst][3]
+            W, L = sizes[dst]
             placed[dst] = (xmax + 1.0, 0.0, xmax + 1.0 + W, L)
             pending.discard(dst)
             order.append(dst)
@@ -333,7 +333,7 @@ def process(capture: Path, out_dir: Path, **_) -> dict:
         hs = [s.ceiling - s.floor for s in shots if s.ceiling is not None and s.floor is not None]
         info[name] = {"W": W, "L": L, "hwW": hw(small), "hwL": hw(large), "n_corner": n,
                       "heights": hs, "kinds": [s.kind for s in shots]}
-        sizes[name] = (0, 0, W, L)
+        sizes[name] = (W, L)
 
     links = neighbours(rooms_shots)
     edges = sorted({tuple(sorted((a, sh.extra["neighbour"]))) for a, sh in links if sh.extra.get("neighbour")})
