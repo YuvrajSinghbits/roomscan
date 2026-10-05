@@ -59,4 +59,22 @@ summarised below.
 
 ## 5. Result
 
-_Filled in from the after run; see the section below._
+| capture | before: regions (impossible pairs) | after: regions | after: flags / scope items |
+|---|---|---|---|
+| single_room | 10 (2) | 2 | 2 / 4 |
+| floor_only | 9 (2) | 0 | 0 / 0 |
+| with_ceiling | 14 (3) | 0 | 0 / 0 |
+
+**The prediction held:** at most 3 regions per capture (measured 2, 0, 0), with 0
+impossible class/surface pairs. Phantom regions on the three clean captures fell
+from 33 to 2, a 94% drop.
+
+The "before" count for `single_room` is 10 here versus 19 in §1. The declaration
+was written from the first shipped run, which sampled 40 views; both before and
+after runs in the table use the current 20 views, so the comparison is like for
+like.
+
+What it did not prove: recall. With no staged-damage room there is no real defect
+to find, so the multi-view rule's cost on true positives is unmeasured. The two
+remaining `single_room` regions were not inspected individually; they may be real
+marks or residual phantoms.

@@ -96,8 +96,10 @@ ARKit is gravity-aligned, so heading and position drift.
   first and last frames under-corrected by 15% in testing.
 * **Ablation** (`--no-drift-correction`). On the synthetic drifted export, the
   stitched footprint error is 0.04 m² with correction and 3.45 m² (−7.7%)
-  without. The real-capture ablation is in benchmark_results.md. "Poses used
-  as-is" is only ever the ablation.
+  without. On the largest sample capture (`with_ceiling`, 98.9 m walk, loop
+  closed with a 0.21 m offset), switching correction off loses 4.3 m² (−7.5%)
+  of the stitched footprint (58.02 → 53.68 m²); see benchmark_results.md.
+  "Poses used as-is" is only ever the ablation.
 
 ## 5. Error budget and intervals
 

@@ -34,7 +34,7 @@ def summary(d):
         "doors": sum(o["type"] == "door" for o in ops),
         "windows": sum(o["type"] == "window" for o in ops),
         "ceil": [r["ceiling_height"]["value"] for r in rooms],
-        "ceil_seen": all("note" not in r["ceiling_height"] for r in rooms),
+        "ceil_note": next((r["ceiling_height"]["note"].split(";")[0] for r in rooms if "note" in r["ceiling_height"]), None),
         "damage": len(d["damage"]),
         "flags": len(d["concealed_damage_flags"]),
         "scope": len(d["scope"]),
@@ -60,7 +60,7 @@ def main():
                 print(f"| {c} | {tier} | not run | | | | | | | | |")
                 continue
             s = summary(d)
-            ceil = ", ".join(f"{x:.2f}" for x in s["ceil"]) + ("" if s["ceil_seen"] else " (lower bound: ceiling not scanned)")
+            ceil = ", ".join(f"{x:.2f}" for x in s["ceil"]) + (f" ({s['ceil_note']})" if s["ceil_note"] else "")
             print(f"| {c} | {tier} | {s['rooms']} | {s['adj']} | {s['doors']} | {s['windows']} | {fmt(s['footprint'])} | "
                   f"{s['wall_hw_med']:.3f} | {ceil} | {s['damage']} / {s['flags']} / {s['scope']} | {s['runtime']} |")
 

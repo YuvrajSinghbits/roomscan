@@ -2,7 +2,7 @@
 # Regenerate every reported output from raw inputs.  Usage: bash scripts/run_all.sh
 set -e
 D="data/raw/sample/Assignment - YC Startup"
-export HF_HUB_DISABLE_SYMLINKS_WARNING=1
+export HF_HUB_DISABLE_SYMLINKS_WARNING=1 PYTHONIOENCODING=utf-8
 for c in c00a170fe1:single_room 1a8384c3f6:floor_only c7d28f72c6:with_ceiling; do
   id=${c%%:*}; name=${c##*:}
   roomscan run "$D/$id" --out out/lidar_$name
