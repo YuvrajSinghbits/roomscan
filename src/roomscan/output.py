@@ -113,7 +113,7 @@ def widen(doc, rel: float, abs_: float):
                 r = rel * (2 if x["unit"] == "m2" else 1)
                 a = abs_ * (np.sqrt(max(v, 0)) * 2 if x["unit"] == "m2" else 1)
                 add = float(np.hypot(r * abs(v), a))
-                x["lo"] = round(v - float(np.hypot(v - x["lo"], add)), 4)
+                x["lo"] = round(max(v - float(np.hypot(v - x["lo"], add)), 0.0), 4)   # lengths and areas are >= 0
                 x["hi"] = round(v + float(np.hypot(x["hi"] - v, add)), 4)
             for y in x.values():
                 walk(y)
